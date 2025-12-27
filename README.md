@@ -1,6 +1,3 @@
-
-# AoiStitcher v1.3 📸
-
 **AoiStitcher** 是一款专为摄影师设计的极简风长图拼接工具。它采用了 iOS 风格的 UI 交互，支持磁吸式拖拽排序、高精度水印微调以及全自动路径记忆，旨在为样片展示和社交媒体分享提供最高效的后期工作流。
 
 ---
@@ -35,3 +32,28 @@
 - 依赖库：
   ```bash
   pip install Pillow tkinterdnd2 tkmacosx
+
+运行程序
+python AoiStitcher.py
+
+🛠 技术参数
+| 维度 | 技术实现 / 参数 |
+|---|---|
+| 界面库 | Tkinter / tkmacosx (兼容 macOS 按钮色值) |
+| 图像引擎 | Pillow (PIL) - 使用 LANCZOS 高质量重采样 |
+| 交互逻辑 | TkinterDnD2 拖拽框架 / 磁吸坐标算法 |
+| 配置文件 | ~/Documents/aoi_stitcher_config.json |
+| 导出格式 | 300 DPI 高质量 JPEG |
+
+🤝 致谢
+ * 感谢 77映像大帅老师 的灵感支持。
+ * 感谢 Gemini 提供全程技术支持与代码优化。
+   
+👨‍💻 关于开发者
+Developer: Polo Aoi (ポロ蒼)
+Position: Wedding Photographer / Tech Enthusiast
+
+本项目旨在解决摄影后期中繁琐的拼图流程，坚持“极简、高效、优雅”的设计原则。
+
+⚖️ 许可证
+Internal Use Only / Polo Aoi Edition
