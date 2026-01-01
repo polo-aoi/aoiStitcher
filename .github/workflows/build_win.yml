@@ -1,0 +1,37 @@
+name: Build Windows Exe
+
+# 触发机制：当你推送代码，或者手动点击按钮时触发
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest  # 指定使用 Windows 环境
+
+    steps:
+    - name: 拉取代码
+      uses: actions/checkout@v3
+
+    - name: 设置 Python 环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        architecture: 'x64'
+
+    - name: 安装依赖库
+      run: |
+        pip install --upgrade pip
+        pip install pillow tkinterdnd2 pyinstaller
+
+    - name: 开始打包 EXE
+      # 这里指定了使用 main.py 和 logo.ico
+      run: |
+        pyinstaller --noconfirm --onefile --windowed --name "AoiStitcher_Win" --icon="logo.ico" --collect-all "tkinterdnd2" --exclude-module numpy --exclude-module matplotlib "main.py"
+
+    - name: 上传成品
+      uses: actions/upload-artifact@v4
+      with:
+        name: AoiStitcher_Windows_Version
+        path: dist/*.exe
