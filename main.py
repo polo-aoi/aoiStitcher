@@ -671,11 +671,27 @@ class AoiStitcher:
 
     def add_watermark(self, path):
         self.watermark_id_counter += 1
+        sw = max(self.stage.winfo_width() - 60, 100)
+        sh = max(self.stage.winfo_height() - 40, 100)
+        tw = int(self.width_entry.get())
+        sp = int(self.spacing_entry.get())
+        bh = int(self.bottom_entry.get())
+        heights = []
+        for i, p in enumerate(self.image_paths):
+            if p in self.img_crops:
+                heights.append(int(self.img_crops[p]["h"]))
+            else:
+                heights.append(int(tw * self.img_ratios[i]))
+        total_h = sum(heights) + (len(heights) - 1) * sp + bh
+        scale = min(sw / tw, sh / total_h) if total_h > 0 else 1
+        canvas_top_y = (self.stage.winfo_height() - int(total_h * scale)) // 2
+        start_x = (self.stage.winfo_width() - int(tw * scale)) // 2
+
         wm = {
             "id": self.watermark_id_counter,
             "path": path,
-            "x": 200,
-            "y": 200,
+            "x": (tw // 2) / scale if scale > 0 else tw // 2,
+            "y": (int(total_h * scale) // 2) / scale if scale > 0 else total_h // 2,
             "scale": 0.5
         }
         self.watermarks.append(wm)
@@ -695,7 +711,24 @@ class AoiStitcher:
         wmi.show_handles()
 
     def update_watermark_position(self, wmi):
-        wmi.place(x=wmi.wm_data["x"], y=wmi.wm_data["y"])
+        sw = max(self.stage.winfo_width() - 60, 100)
+        sh = max(self.stage.winfo_height() - 40, 100)
+        tw = int(self.width_entry.get())
+        sp = int(self.spacing_entry.get())
+        bh = int(self.bottom_entry.get())
+        heights = []
+        for i, p in enumerate(self.image_paths):
+            if p in self.img_crops:
+                heights.append(int(self.img_crops[p]["h"]))
+            else:
+                heights.append(int(tw * self.img_ratios[i]))
+        total_h = sum(heights) + (len(heights) - 1) * sp + bh
+        scale = min(sw / tw, sh / total_h) if total_h > 0 else 1
+        canvas_top_y = (self.stage.winfo_height() - int(total_h * scale)) // 2
+        start_x = (self.stage.winfo_width() - int(tw * scale)) // 2
+
+        wmi.wm_data["x"] = (wmi.winfo_x() - start_x) / scale if scale > 0 else 0
+        wmi.wm_data["y"] = (wmi.winfo_y() - canvas_top_y) / scale if scale > 0 else 0
 
     def _delete_watermark(self, wm_id):
         self.watermarks = [w for w in self.watermarks if w["id"] != wm_id]
@@ -738,23 +771,16 @@ class AoiStitcher:
         self.crop_ratio = None
 
         if self.crop_canvas is None:
-            self.crop_canvas = tk.Canvas(self.stage, bg="transparent", highlightthickness=0, cursor="crosshair")
+            self.crop_canvas = tk.Canvas(self.stage, bg="", highlightthickness=0, cursor="crosshair")
         self.crop_canvas.place(x=0, y=0, relwidth=1, relheight=1)
         self._draw_crop_rect()
 
         self.crop_toolbar.place(relx=0.5, y=10, anchor="n")
-        tk.Label(self.crop_toolbar, text="裁剪比例:", fg="white", bg="#1C1C1E", font=FONT_BODY).pack(side="left", padx=(0, 10))
-        self.crop_ratio_var = tk.StringVar(value="自由")
-        ratio_menu = ttk.Combobox(self.crop_toolbar, textvariable=self.crop_ratio_var, values=[r[0] for r in CROP_RATIOS],
-                                   state="readonly", width=8, font=FONT_BODY)
-        ratio_menu.pack(side="left")
-        ratio_menu.bind("<<ComboboxSelected>>", self._on_crop_ratio_change)
-        MacButton(self.crop_toolbar, text="确认", bg=ACCENT_GREEN, fg="black", borderless=1,
-                 command=self.confirm_crop, width=60).pack(side="left", padx=10)
-        MacButton(self.crop_toolbar, text="取消", bg="#444", fg="white", borderless=1,
-                 command=self.exit_crop_mode, width=60).pack(side="left", padx=5)
-        MacButton(self.crop_toolbar, text="重置", bg="#444", fg="white", borderless=1,
-                 command=self._reset_crop_rect, width=60).pack(side="left", padx=5)
+        tk.Label(self.crop_toolbar, text="拖拽划出裁剪区域", fg="white", bg="#1C1C1E", font=FONT_BODY).pack(side="left", padx=(0, 10))
+        MacButton(self.crop_toolbar, text="✓ 确认", bg=ACCENT_GREEN, fg="black", borderless=1,
+                 command=self.confirm_crop, width=70).pack(side="left", padx=10)
+        MacButton(self.crop_toolbar, text="✕ 取消", bg="#444", fg="white", borderless=1,
+                 command=self.exit_crop_mode, width=70).pack(side="left", padx=5)
 
         self.crop_canvas.bind("<Button-1>", self._crop_on_click)
         self.crop_canvas.bind("<B1-Motion>", self._crop_on_drag)
@@ -764,140 +790,34 @@ class AoiStitcher:
             if tile_w != tile:
                 tile_w.lower()
 
-    def _on_crop_ratio_change(self, event=None):
-        name = self.crop_ratio_var.get()
-        for label, val in CROP_RATIOS:
-            if label == name:
-                self.crop_ratio = val
-                if val is not None:
-                    cx = self.crop_rect["x"] + self.crop_rect["w"] / 2
-                    cy = self.crop_rect["y"] + self.crop_rect["h"] / 2
-                    self.crop_rect["h"] = self.crop_rect["w"] / val
-                    self.crop_rect["x"] = cx - self.crop_rect["w"] / 2
-                    self.crop_rect["y"] = cy - self.crop_rect["h"] / 2
-                    self._draw_crop_rect()
-                break
-
-    def _reset_crop_rect(self):
-        tw = self.canvas_bg_frame.winfo_width()
-        th = self.crop_tile.winfo_height()
-        tx = self.crop_tile.winfo_x()
-        ty = self.crop_tile.winfo_y()
-        self.crop_rect = {
-            "x": tx + tw * 0.1,
-            "y": ty + th * 0.1,
-            "w": tw * 0.8,
-            "h": th * 0.8
-        }
-        self._draw_crop_rect()
-
     def _draw_crop_rect(self):
         self.crop_canvas.delete("crop")
         r = self.crop_rect
-        x1, y1, x2, y2 = r["x"], r["y"], r["x"] + r["w"], r["y"] + r["h"]
+        x1, y1 = r["x"], r["y"]
+        x2, y2 = x1 + r["w"], y1 + r["h"]
+        if r["w"] < 0:
+            x1, x2 = x2, x1
+        if r["h"] < 0:
+            y1, y2 = y2, y1
         self.crop_canvas.create_rectangle(x1, y1, x2, y2, outline=ACCENT_BLUE, width=3, tags="crop")
         self.crop_canvas.create_rectangle(x1, y1, x2, y2, fill="#330A84FF", stipple="gray25", tags="crop")
-        for px, py in [(x1, y1), (x2, y1), (x1, y2), (x2, y2)]:
-            self.crop_canvas.create_oval(px - 6, py - 6, px + 6, py + 6, fill=ACCENT_BLUE, outline="white", tags="crop")
-        self.crop_canvas.create_line(x1, y1, x2, y2, fill=ACCENT_BLUE, dash=(5, 5), tags="crop")
-        self.crop_canvas.create_line(x1, y2, x2, y1, fill=ACCENT_BLUE, dash=(5, 5), tags="crop")
-
-    def _get_crop_handle(self, x, y):
-        r = self.crop_rect
-        h = 12
-        handles = {
-            "nw": (r["x"], r["y"]),
-            "n": (r["x"] + r["w"] / 2, r["y"]),
-            "ne": (r["x"] + r["w"], r["y"]),
-            "e": (r["x"] + r["w"], r["y"] + r["h"] / 2),
-            "se": (r["x"] + r["w"], r["y"] + r["h"]),
-            "s": (r["x"] + r["w"] / 2, r["y"] + r["h"]),
-            "sw": (r["x"], r["y"] + r["h"]),
-            "w": (r["x"], r["y"] + r["h"] / 2),
-        }
-        for name, (hx, hy) in handles.items():
-            if abs(x - hx) < h and abs(y - hy) < h:
-                return name
-        return None
 
     def _crop_on_click(self, event):
-        handle = self._get_crop_handle(event.x, event.y)
-        if handle:
-            self.crop_handle_drag = handle
-        else:
-            self.crop_handle_drag = "move"
+        self.crop_handle_drag = "drawing"
+        rx, ry = self.crop_tile.winfo_x(), self.crop_tile.winfo_y()
+        self.crop_rect = {
+            "x": event.x,
+            "y": event.y,
+            "w": 0,
+            "h": 0
+        }
         self.crop_drag_start = {"x": event.x, "y": event.y}
-        self.crop_rect_orig = dict(self.crop_rect)
 
     def _crop_on_drag(self, event):
-        if self.crop_handle_drag is None:
-            return
-        dx = event.x - self.crop_drag_start["x"]
-        dy = event.y - self.crop_drag_start["y"]
-        r = self.crop_rect_orig
-        cr = self.crop_rect
-
-        tw = self.canvas_bg_frame.winfo_width()
-        tile_x = self.crop_tile.winfo_x()
-        tile_y = self.crop_tile.winfo_y()
-        tile_h = self.crop_tile.winfo_height()
-
-        if self.crop_handle_drag == "move":
-            new_x = r["x"] + dx
-            new_y = r["y"] + dy
-            new_x = max(tile_x, min(new_x, tile_x + tw - r["w"]))
-            new_y = max(tile_y, min(new_y, tile_y + tile_h - r["h"]))
-            cr["x"] = new_x
-            cr["y"] = new_y
-        else:
-            h = self.crop_handle_drag
-            if h == "nw":
-                cr["w"] = r["w"] - dx
-                cr["h"] = r["h"] - dy
-                cr["x"] = r["x"] + dx
-                cr["y"] = r["y"] + dy
-            elif h == "ne":
-                cr["w"] = r["w"] + dx
-                cr["h"] = r["h"] - dy
-                cr["y"] = r["y"] + dy
-            elif h == "sw":
-                cr["w"] = r["w"] - dx
-                cr["h"] = r["h"] + dy
-                cr["x"] = r["x"] + dx
-            elif h == "se":
-                cr["w"] = r["w"] + dx
-                cr["h"] = r["h"] + dy
-            elif h == "n":
-                cr["h"] = r["h"] - dy
-                cr["y"] = r["y"] + dy
-            elif h == "s":
-                cr["h"] = r["h"] + dy
-            elif h == "w":
-                cr["w"] = r["w"] - dx
-                cr["x"] = r["x"] + dx
-            elif h == "e":
-                cr["w"] = r["w"] + dx
-
-            if cr["w"] < 30:
-                cr["w"] = 30
-                if h in ["nw", "w", "sw"]:
-                    cr["x"] = r["x"] + r["w"] - 30
-            if cr["h"] < 30:
-                cr["h"] = 30
-                if h in ["nw", "n", "ne"]:
-                    cr["y"] = r["y"] + r["h"] - 30
-
-            if self.crop_ratio is not None:
-                cx = r["x"] + r["w"] / 2
-                cy = r["y"] + r["h"] / 2
-                if h in ["nw", "ne", "sw", "se", "e", "w"]:
-                    cr["h"] = cr["w"] / self.crop_ratio
-                else:
-                    cr["w"] = cr["h"] * self.crop_ratio
-                cr["x"] = cx - cr["w"] / 2
-                cr["y"] = cy - cr["h"] / 2
-
-        self._draw_crop_rect()
+        if self.crop_handle_drag == "drawing":
+            self.crop_rect["w"] = event.x - self.crop_drag_start["x"]
+            self.crop_rect["h"] = event.y - self.crop_drag_start["y"]
+            self._draw_crop_rect()
 
     def _crop_on_release(self, event):
         self.crop_handle_drag = None
@@ -905,23 +825,34 @@ class AoiStitcher:
     def confirm_crop(self):
         tile = self.crop_tile
         cr = self.crop_rect
+        if abs(cr["w"]) < 5 or abs(cr["h"]) < 5:
+            self.exit_crop_mode()
+            return
+
+        x1 = min(cr["x"], cr["x"] + cr["w"])
+        y1 = min(cr["y"], cr["y"] + cr["h"])
+        x2 = max(cr["x"], cr["x"] + cr["w"])
+        y2 = max(cr["y"], cr["y"] + cr["h"])
+
         tile_x = tile.winfo_x()
         tile_y = tile.winfo_y()
-        tw = self.canvas_bg_frame.winfo_width()
-        scale = tw / (tile.winfo_width() - 4)
+        tile_w = tile.winfo_width()
+        tile_h = tile.winfo_height()
 
-        orig_w = tile.raw_pil.size[0]
-        img_x = (cr["x"] - tile_x) / tile.winfo_width() * orig_w
-        img_y = (cr["y"] - tile_y) / tile.winfo_height() * (orig_w / self.img_ratios[tile.index])
-        img_w = cr["w"] / tile.winfo_width() * orig_w
-        img_h = cr["h"] / tile.winfo_height() * (orig_w / self.img_ratios[tile.index])
+        orig_w, orig_h = tile.raw_pil.size
+        ratio = orig_h / orig_w
+
+        img_x = (x1 - tile_x) / tile_w * orig_w
+        img_y = (y1 - tile_y) / tile_h * (orig_w * ratio)
+        img_w = (x2 - x1) / tile_w * orig_w
+        img_h = (y2 - y1) / tile_h * (orig_w * ratio)
 
         self.img_crops[tile.image_path] = {
             "x": max(0, img_x),
             "y": max(0, img_y),
-            "w": min(img_w, orig_w - max(0, img_x)),
-            "h": min(img_h, (orig_w / self.img_ratios[tile.index]) - max(0, img_y)),
-            "ratio": self.crop_ratio_var.get()
+            "w": max(1, img_w),
+            "h": max(1, img_h),
+            "ratio": "自由"
         }
 
         self.exit_crop_mode()
@@ -1027,8 +958,12 @@ class AoiStitcher:
                     self.logo_label.place_forget()
             else:
                 self.logo_label.place_forget()
+                canvas_top_y = (self.stage.winfo_height() - int(total_h * scale)) // 2
                 for wm in self.watermark_widgets:
-                    wm.place(x=wm.wm_data["x"], y=wm.wm_data["y"])
+                    wx = start_x + wm.wm_data["x"] * scale
+                    wy = canvas_top_y + wm.wm_data["y"] * scale
+                    wm.place(x=wx, y=wy)
+                    wm.lift()
 
         except Exception:
             pass
