@@ -192,15 +192,19 @@ class WatermarkItem(tk.Frame):
         self.start_mouse_y = event.y_root
         self.start_x = self.wm_data["x"]
         self.start_y = self.wm_data["y"]
+        # Capture initial screen position for correct drag math
+        self.drag_start_screen_x = self.winfo_x()
+        self.drag_start_screen_y = self.winfo_y()
         self.lift()
 
     def do_drag(self, event):
         if self.is_dragging:
             dx = event.x_root - self.start_mouse_x
             dy = event.y_root - self.start_mouse_y
-            self.wm_data["x"] = self.start_x + dx
-            self.wm_data["y"] = self.start_y + dy
-            self.controller.update_watermark_position(self)
+            # Use screen coords during drag to avoid mixing canvas/screen units
+            new_screen_x = self.drag_start_screen_x + dx
+            new_screen_y = self.drag_start_screen_y + dy
+            self.controller.update_watermark_position(self, new_screen_x, new_screen_y)
 
     def stop_drag(self, event):
         self.is_dragging = False
@@ -714,7 +718,7 @@ class AoiStitcher:
         self.selected_watermark = wmi
         wmi.show_handles()
 
-    def update_watermark_position(self, wmi):
+    def update_watermark_position(self, wmi, new_screen_x=None, new_screen_y=None):
         sw = max(self.stage.winfo_width() - 60, 100)
         sh = max(self.stage.winfo_height() - 40, 100)
         tw = int(self.width_entry.get())
@@ -731,8 +735,12 @@ class AoiStitcher:
         canvas_top_y = (self.stage.winfo_height() - int(total_h * scale)) // 2
         start_x = (self.stage.winfo_width() - int(tw * scale)) // 2
 
-        wmi.wm_data["x"] = (wmi.winfo_x() - start_x) / scale if scale > 0 else 0
-        wmi.wm_data["y"] = (wmi.winfo_y() - canvas_top_y) / scale if scale > 0 else 0
+        if new_screen_x is not None:
+            wmi.wm_data["x"] = (new_screen_x - start_x) / scale if scale > 0 else 0
+            wmi.wm_data["y"] = (new_screen_y - canvas_top_y) / scale if scale > 0 else 0
+        else:
+            wmi.wm_data["x"] = (wmi.winfo_x() - start_x) / scale if scale > 0 else 0
+            wmi.wm_data["y"] = (wmi.winfo_y() - canvas_top_y) / scale if scale > 0 else 0
 
     def _delete_watermark(self, wm_id):
         self.watermarks = [w for w in self.watermarks if w["id"] != wm_id]
