@@ -97,6 +97,10 @@ class DraggableTile(tk.Frame):
             widget.bind("<ButtonPress-1>", self.start_drag, add="+")
             widget.bind("<B1-Motion>", self.do_drag)
             widget.bind("<ButtonRelease-1>", self.stop_drag)
+            widget.bind("<Button-3>", self.on_right_click)
+
+    def on_right_click(self, event):
+        self.controller.show_crop_menu(self, event)
 
     def on_click(self, event):
         self.controller.set_selected(self)
@@ -750,74 +754,183 @@ class AoiStitcher:
         if self.selected_tile:
             self.enter_crop_mode(self.selected_tile)
 
-    def enter_crop_mode(self, tile):
+    def show_crop_menu(self, tile, event):
+        menu = Menu(self.root, tearoff=0)
+        for label, val in CROP_RATIOS:
+            menu.add_command(label=f"裁剪 ({label})", command=lambda r=val, lbl=label: self._start_crop_with_ratio(tile, r, lbl))
+        menu.add_separator()
+        menu.add_command(label="清除裁剪", command=lambda: self._clear_crop(tile))
+        try:
+            menu.post(event.x_root, event.y_root)
+        except:
+            pass
+
+    def _start_crop_with_ratio(self, tile, ratio, label):
+        self.set_selected(tile)
+        self.enter_crop_mode(tile, ratio)
+        self.crop_ratio_label = label
+
+    def _clear_crop(self, tile):
+        if tile.image_path in self.img_crops:
+            del self.img_crops[tile.image_path]
+            self.realign_all()
+
+    def enter_crop_mode(self, tile, ratio=None):
         if self.crop_mode:
             self.exit_crop_mode()
         self.crop_mode = True
         self.crop_tile = tile
-        self.crop_tile.lift()
+        self.crop_ratio = ratio
+        self.crop_ratio_label = "自由"
 
-        tw = self.canvas_bg_frame.winfo_width()
+        tw = tile.winfo_width()
         th = tile.winfo_height()
-        tx = self.crop_tile.winfo_x()
-        ty = self.crop_tile.winfo_y()
+        tx = tile.winfo_x()
+        ty = tile.winfo_y()
 
-        self.crop_rect = {
-            "x": tx + tw * 0.1,
-            "y": ty + th * 0.1,
-            "w": tw * 0.8,
-            "h": th * 0.8
-        }
-        self.crop_ratio = None
+        self.crop_rect = {"x": tx, "y": ty, "w": tw, "h": th}
+        self.crop_tile_orig = {"x": tx, "y": ty, "w": tw, "h": th}
+
+        if ratio is not None:
+            self._apply_ratio_to_crop(ratio)
 
         if self.crop_canvas is None:
             self.crop_canvas = tk.Canvas(self.stage, bg="", highlightthickness=0, cursor="crosshair")
         self.crop_canvas.place(x=0, y=0, relwidth=1, relheight=1)
-        self._draw_crop_rect()
-
-        self.crop_toolbar.place(relx=0.5, y=10, anchor="n")
-        tk.Label(self.crop_toolbar, text="拖拽划出裁剪区域", fg="white", bg="#1C1C1E", font=FONT_BODY).pack(side="left", padx=(0, 10))
-        MacButton(self.crop_toolbar, text="✓ 确认", bg=ACCENT_GREEN, fg="black", borderless=1,
-                 command=self.confirm_crop, width=70).pack(side="left", padx=10)
-        MacButton(self.crop_toolbar, text="✕ 取消", bg="#444", fg="white", borderless=1,
-                 command=self.exit_crop_mode, width=70).pack(side="left", padx=5)
+        self._draw_crop_overlay()
 
         self.crop_canvas.bind("<Button-1>", self._crop_on_click)
         self.crop_canvas.bind("<B1-Motion>", self._crop_on_drag)
         self.crop_canvas.bind("<ButtonRelease-1>", self._crop_on_release)
 
-        for tile_w in self.tile_widgets:
-            if tile_w != tile:
-                tile_w.lower()
+        self._show_crop_toolbar()
 
-    def _draw_crop_rect(self):
-        self.crop_canvas.delete("crop")
+    def _apply_ratio_to_crop(self, ratio):
+        if ratio is None or not self.crop_rect:
+            return
+        orig = self.crop_tile_orig
+        cx = orig["x"] + orig["w"] / 2
+        cy = orig["y"] + orig["h"] / 2
+        if ratio >= 1:
+            new_w = orig["w"]
+            new_h = orig["w"] / ratio
+            if new_h > orig["h"]:
+                new_h = orig["h"]
+                new_w = orig["h"] * ratio
+        else:
+            new_h = orig["h"]
+            new_w = orig["h"] * ratio
+            if new_w > orig["w"]:
+                new_w = orig["w"]
+                new_h = orig["w"] / ratio
+        self.crop_rect["w"] = new_w
+        self.crop_rect["h"] = new_h
+        self.crop_rect["x"] = cx - new_w / 2
+        self.crop_rect["y"] = cy - new_h / 2
+
+    def _show_crop_toolbar(self):
+        for w in self.crop_toolbar.winfo_children():
+            w.destroy()
+        tk.Label(self.crop_toolbar, text="裁剪", fg="white", bg="#1C1C1E", font=FONT_BOLD).pack(side="left", padx=(0, 5))
+        for label, val in CROP_RATIOS:
+            active = "disabled" if self.crop_mode and self.crop_ratio == val else "normal"
+            MacButton(self.crop_toolbar, text=label,
+                     command=lambda r=val, lbl=label: self._set_crop_ratio(r, lbl),
+                     bg=ACCENT_BLUE if self.crop_mode and self.crop_ratio == val else "#444",
+                     fg="white", borderless=1, width=50).pack(side="left", padx=2)
+        MacButton(self.crop_toolbar, text="✓ 确认", bg=ACCENT_GREEN, fg="black", borderless=1,
+                 command=self.confirm_crop, width=60).pack(side="left", padx=8)
+        MacButton(self.crop_toolbar, text="✕ 取消", bg="#444", fg="white", borderless=1,
+                 command=self.exit_crop_mode, width=60).pack(side="left", padx=5)
+        self.crop_toolbar.place(relx=0.5, y=10, anchor="n")
+
+    def _set_crop_ratio(self, ratio, label):
+        self.crop_ratio = ratio
+        self.crop_ratio_label = label
+        if ratio is not None:
+            self._apply_ratio_to_crop(ratio)
+        else:
+            orig = self.crop_tile_orig
+            self.crop_rect = dict(orig)
+        self._draw_crop_overlay()
+        self._show_crop_toolbar()
+
+    def _draw_crop_overlay(self):
+        self.crop_canvas.delete("all")
+        if not self.crop_rect:
+            return
         r = self.crop_rect
-        x1, y1 = r["x"], r["y"]
-        x2, y2 = x1 + r["w"], y1 + r["h"]
-        if r["w"] < 0:
-            x1, x2 = x2, x1
-        if r["h"] < 0:
-            y1, y2 = y2, y1
-        self.crop_canvas.create_rectangle(x1, y1, x2, y2, outline=ACCENT_BLUE, width=3, tags="crop")
-        self.crop_canvas.create_rectangle(x1, y1, x2, y2, fill="#330A84FF", stipple="gray25", tags="crop")
+        x1, y1, x2, y2 = r["x"], r["y"], r["x"] + r["w"], r["y"] + r["h"]
+        sw = self.stage.winfo_width()
+        sh = self.stage.winfo_height()
+        self.crop_canvas.create_rectangle(0, 0, sw, sh, fill="#000000", stipple="gray25", tags="dim")
+        self.crop_canvas.create_rectangle(x1, y1, x2, y2, fill="", outline=ACCENT_BLUE, width=2, tags="crop")
+        self.crop_canvas.create_rectangle(x1, y1, x2, y2, fill="", outline="white", width=1, dash=(4, 4), tags="crop")
+        for px, py in [(x1, y1), (x2, y1), (x1, y2), (x2, y2)]:
+            self.crop_canvas.create_oval(px - 5, py - 5, px + 5, py + 5, fill=ACCENT_BLUE, outline="white", tags="crop")
+
+    def _get_crop_handle(self, x, y):
+        r = self.crop_rect
+        h_dist = 12
+        cx = r["x"] + r["w"] / 2
+        cy = r["y"] + r["h"] / 2
+        edges = {
+            "n": (cx, r["y"]),
+            "s": (cx, r["y"] + r["h"]),
+            "w": (r["x"], cy),
+            "e": (r["x"] + r["w"], cy),
+        }
+        for name, (hx, hy) in edges.items():
+            if abs(x - hx) < h_dist and abs(y - hy) < h_dist:
+                return name
+        return None
 
     def _crop_on_click(self, event):
-        self.crop_handle_drag = "drawing"
-        rx, ry = self.crop_tile.winfo_x(), self.crop_tile.winfo_y()
-        self.crop_rect = {
-            "x": event.x,
-            "y": event.y,
-            "w": 0,
-            "h": 0
-        }
+        x, y = event.x, event.y
+        self.crop_handle_drag = self._get_crop_handle(x, y)
         self.crop_drag_start = {"x": event.x, "y": event.y}
+        self.crop_rect_orig = dict(self.crop_rect)
 
     def _crop_on_drag(self, event):
-        if self.crop_handle_drag == "drawing":
-            self.crop_rect["w"] = event.x - self.crop_drag_start["x"]
-            self.crop_rect["h"] = event.y - self.crop_drag_start["y"]
-            self._draw_crop_rect()
+        if self.crop_handle_drag is None:
+            return
+        dx = event.x - self.crop_drag_start["x"]
+        dy = event.y - self.crop_drag_start["y"]
+        r = self.crop_rect_orig
+        cr = self.crop_rect
+        h = self.crop_handle_drag
+
+        if h == "n":
+            new_h = max(20, r["h"] - dy)
+            new_w = new_h * self.crop_ratio if self.crop_ratio else r["w"]
+            cr["x"] = r["x"] + r["w"] / 2 - new_w / 2
+            cr["y"] = r["y"] + r["h"] - new_h
+            cr["w"] = new_w
+            cr["h"] = new_h
+        elif h == "s":
+            new_h = max(20, r["h"] + dy)
+            new_w = new_h * self.crop_ratio if self.crop_ratio else r["w"]
+            cr["w"] = new_w
+            cr["h"] = new_h
+            cr["x"] = r["x"] + r["w"] / 2 - new_w / 2
+        elif h == "w":
+            new_w = max(20, r["w"] - dx)
+            new_h = new_w / self.crop_ratio if self.crop_ratio else r["h"]
+            cr["x"] = r["x"] + r["w"] - new_w
+            cr["y"] = r["y"] + r["h"] / 2 - new_h / 2
+            cr["w"] = new_w
+            cr["h"] = new_h
+        elif h == "e":
+            new_w = max(20, r["w"] + dx)
+            new_h = new_w / self.crop_ratio if self.crop_ratio else r["h"]
+            cr["y"] = r["y"] + r["h"] / 2 - new_h / 2
+            cr["w"] = new_w
+            cr["h"] = new_h
+
+        orig = self.crop_tile_orig
+        cr["x"] = max(orig["x"], min(cr["x"], orig["x"] + orig["w"] - 20))
+        cr["y"] = max(orig["y"], min(cr["y"], orig["y"] + orig["h"] - 20))
+        self._draw_crop_overlay()
 
     def _crop_on_release(self, event):
         self.crop_handle_drag = None
@@ -825,42 +938,34 @@ class AoiStitcher:
     def confirm_crop(self):
         tile = self.crop_tile
         cr = self.crop_rect
-        if abs(cr["w"]) < 5 or abs(cr["h"]) < 5:
+        if not tile or not cr:
             self.exit_crop_mode()
             return
-
-        x1 = min(cr["x"], cr["x"] + cr["w"])
-        y1 = min(cr["y"], cr["y"] + cr["h"])
-        x2 = max(cr["x"], cr["x"] + cr["w"])
-        y2 = max(cr["y"], cr["y"] + cr["h"])
-
-        tile_x = tile.winfo_x()
-        tile_y = tile.winfo_y()
-        tile_w = tile.winfo_width()
-        tile_h = tile.winfo_height()
-
+        x1 = cr["x"]
+        y1 = cr["y"]
+        x2 = cr["x"] + cr["w"]
+        y2 = cr["y"] + cr["h"]
+        orig = self.crop_tile_orig
         orig_w, orig_h = tile.raw_pil.size
         ratio = orig_h / orig_w
-
-        img_x = (x1 - tile_x) / tile_w * orig_w
-        img_y = (y1 - tile_y) / tile_h * (orig_w * ratio)
-        img_w = (x2 - x1) / tile_w * orig_w
-        img_h = (y2 - y1) / tile_h * (orig_w * ratio)
-
+        img_x = (x1 - orig["x"]) / orig["w"] * orig_w
+        img_y = (y1 - orig["y"]) / orig["h"] * (orig_w * ratio)
+        img_w = (x2 - x1) / orig["w"] * orig_w
+        img_h = (y2 - y1) / orig["h"] * (orig_w * ratio)
         self.img_crops[tile.image_path] = {
             "x": max(0, img_x),
             "y": max(0, img_y),
             "w": max(1, img_w),
             "h": max(1, img_h),
-            "ratio": "自由"
+            "ratio": self.crop_ratio_label if hasattr(self, 'crop_ratio_label') else "自由"
         }
-
         self.exit_crop_mode()
         self.realign_all()
 
     def exit_crop_mode(self):
         self.crop_mode = False
         self.crop_tile = None
+        self.crop_handle_drag = None
         if self.crop_canvas:
             self.crop_canvas.place_forget()
         self.crop_toolbar.place_forget()
@@ -870,7 +975,7 @@ class AoiStitcher:
     def realign_all(self, event=None):
         self.insert_indicator.place_forget()
         if self.crop_mode:
-            self._draw_crop_rect()
+            self.exit_crop_mode()
             return
         if not self.image_paths:
             self.toggle_placeholder()
